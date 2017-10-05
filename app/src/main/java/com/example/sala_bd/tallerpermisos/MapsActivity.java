@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.location.Address;
 import android.location.Geocoder;
 import android.location.Location;
@@ -16,14 +17,19 @@ import android.support.v4.content.ContextCompat;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
+import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.common.api.CommonStatusCodes;
 import com.google.android.gms.common.api.ResolvableApiException;
+import com.google.android.gms.common.api.Status;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationCallback;
 import com.google.android.gms.location.LocationRequest;
@@ -33,28 +39,43 @@ import com.google.android.gms.location.LocationSettingsRequest;
 import com.google.android.gms.location.LocationSettingsResponse;
 import com.google.android.gms.location.LocationSettingsStatusCodes;
 import com.google.android.gms.location.SettingsClient;
+import com.google.android.gms.location.places.Place;
+import com.google.android.gms.location.places.ui.PlaceAutocompleteFragment;
+import com.google.android.gms.location.places.ui.PlaceSelectionListener;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.LatLngBounds;
 import com.google.android.gms.maps.model.MapStyleOptions;
 import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
+import com.google.android.gms.maps.model.Polyline;
+import com.google.android.gms.maps.model.PolylineOptions;
 import com.google.android.gms.tasks.OnFailureListener;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.android.gms.tasks.Task;
+import com.google.maps.DirectionsApi;
+import com.google.maps.GeoApiContext;
+import com.google.maps.android.PolyUtil;
+import com.google.maps.model.DirectionsResult;
+import com.google.maps.model.TravelMode;
+
+import org.joda.time.DateTime;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 public class MapsActivity extends FragmentActivity implements OnMapReadyCallback {
 
     private GoogleMap mMap = null;
     private EditText dirección;
-    private TextView distanci;
+    private TextView distanci, tiempo;
 
     private LocationRequest mLocationRequest; // prender loc si esta apagada
     private LocationCallback mLocationCallback; // objeto que permite suscripción a localización
@@ -63,7 +84,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     public	final	static	double	RADIUS_OF_EARTH_KM	 =	6371;
     private FusedLocationProviderClient mFusedLocationClient;
     private Location location = null;
-    private LatLng actual,desti = null;
+    private LatLng origen,desti = null;
+    private String Norigen = "Centro Comercial Parque La Colina", Ndestino = null;
     private Marker bikeActual , destinoAzul , tienda1
             ,tienda2,tienda3,tienda4,tienda5;
     public double longitudCityBike =  -74.052350, latitudCityBike = 4.732924;
@@ -72,13 +94,27 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     public double longituCastillo =  -74.030582, latitudCastillo = 4.698325;
     public double longituBikers =  -74.036585, latitudBikers = 4.719675;
     private View popup = null;
-    private boolean first = true, permiso = false;
+    private boolean first = true, advanceLooking = false;
     private ImageView move = null;
+    private Button avanzada = null, volver = null, rutas;
+    private Button iniciarRecorrido = null, volverLista = null,
+            cancelar = null;
+    private PlaceAutocompleteFragment autocompleteFragment = null;
+    private DirectionsResult results = null;
+    private ListView listRutas = null;
+    private List<String> listRutasString = new ArrayList<String>();
+    private TextView rutaInfo;
+    private Polyline poly;
+    private int routeSelected =0;
+    private boolean recorriendo = false;
 
     public static final double lowerLeftLatitude = 4.469636;
     public static final double lowerLeftLongitude = -74.177171;
     public static final double upperRightLatitude = 4.817991;
     public static final double upperRigthLongitude = -74.001390;
+
+    private static final String GOOGLE_KEY_SERVER = "AIzaSyA3FRnFnpx7zoMV7xlMjVUOrZKIuOjYykk";
+
 
 
 
@@ -91,9 +127,16 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 .findFragmentById(R.id.map);
         mapFragment.getMapAsync(this);
 
+
         mLocationRequest =	createLocationRequest();
         mFusedLocationClient =	LocationServices.getFusedLocationProviderClient(this);
+
+        /* Move boton que permite volver a ubicación actual.*
+        / Revisa si tiene permisos, sino los pide.
+         */
         distanci = (TextView) findViewById(R.id.textViewDistancia);
+        tiempo = (TextView) findViewById(R.id.textViewTiempo);
+
         move = (ImageView) findViewById(R.id.imageViewMove);
         move.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -102,8 +145,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                         Manifest.permission.ACCESS_FINE_LOCATION);
                 if(permissionCheck==0){
                     if(location!=null && mMap!=null) {
-                        actual = new LatLng(location.getLatitude(), location.getLongitude());
-                        mMap.moveCamera(CameraUpdateFactory.newLatLng(actual));
+                        origen = new LatLng(location.getLatitude(), location.getLongitude());
+                        mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
                         mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
                     }
                 }
@@ -119,9 +162,12 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 // Log.i("LOCATION",	"Location	update	in	the	callback:	"	+	location);
                 localizarActual();
                 calculoDistancia();
+                if(recorriendo)
+                    enMovimiento();
             }
         };
 
+        // revisa si tiene permisos, sino los pide al rutas.
         int permissionCheck = ContextCompat.checkSelfPermission(getApplicationContext(),
                 Manifest.permission.ACCESS_FINE_LOCATION);
         if(permissionCheck == 0){
@@ -129,6 +175,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         }else
             solicitudPermiso ();
 
+
+        // Escucha enter al terminar de escribir destino
         dirección = (EditText) findViewById(R.id.texto);
         dirección.setImeActionLabel("Custom text", KeyEvent.KEYCODE_ENTER);
         dirección.setOnKeyListener(new View.OnKeyListener() {
@@ -142,6 +190,179 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     return true;
                 }
                 return false;
+            }
+        });
+
+         busquedaAvanzada();
+
+        avanzada = (Button) findViewById(R.id.buttonHelp);
+        volver = (Button) findViewById(R.id.buttonBack);
+        rutas = (Button) findViewById(R.id.buttonRutas);
+        iniciarRecorrido = (Button) findViewById(R.id.buttonIniciar);
+        volverLista = (Button) findViewById(R.id.buttonBackList);
+        cancelar = (Button) findViewById(R.id.buttonCancelar);
+        rutaInfo = (TextView) findViewById(R.id.rutaInfo);
+        rutaInfo.setVisibility(View.GONE);
+        volver.setVisibility(View.GONE);
+        volverLista.setVisibility(View.GONE);
+        iniciarRecorrido.setVisibility(View.GONE);
+        cancelar.setVisibility(View.GONE);
+
+        // si el usuario desea buscar de forma avanzada
+        avanzada.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                dirección.setVisibility(View.GONE);
+                avanzada.setVisibility(View.GONE);
+                autocompleteFragment.getView().setVisibility(View.VISIBLE);
+                volver.setVisibility(View.VISIBLE);
+            }
+        });
+
+        // si usuario desea volver a busqeuda normal
+        volver.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                dirección.setVisibility(View.VISIBLE);
+                avanzada.setVisibility(View.VISIBLE);
+                autocompleteFragment.getView().setVisibility(View.GONE);
+                volver.setVisibility(View.GONE);
+                dirección.setText("");
+                destinoAzul.setVisible(false);
+                desti = null;
+                Ndestino = null;
+                calculoDistancia();
+            }
+        });
+
+        listRutas = (ListView) findViewById(R.id.listRutas);
+        listRutas.setVisibility(View.GONE);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_list_item_1, listRutasString);
+        listRutas.setAdapter(adapter);
+        listRutas.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> adapterView, View view, int i, long l) {
+                routeSelected = i;
+                if(removePolyline())
+                    addPolyline(results, i);
+                iniciarRecorrido.setVisibility(View.VISIBLE);
+            }
+        });
+        // inicia recorrido con origen y destino dado
+        rutas.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                boolean complete = true;
+                if(desti == null ){
+                    Toast.makeText(MapsActivity.this, "Especifique un destino", Toast.LENGTH_SHORT).show();
+                    complete = false;
+                }
+                if(origen == null){
+                    Toast.makeText(MapsActivity.this, "Especifique un origen", Toast.LENGTH_SHORT).show();
+                    complete = false;
+                }
+                if(complete){
+                    DateTime now = new DateTime();
+                    try {
+                        results = DirectionsApi.newRequest(getGeoContext())
+                                .mode(TravelMode.DRIVING)// preguntar si hacer dos solictudes con
+                                // biclycling y si vacia con driving o solo driving
+                                .origin(new com.google.maps.model.LatLng(origen.latitude,origen.longitude))
+                                .destination(new com.google.maps.model.LatLng(desti.latitude,desti.longitude))
+                                .alternatives(true)
+                                .departureTime(now)
+                                .await();
+                        listRutasString.clear();
+                        if(results.routes.length>0) {
+                            for(int i = 0; i < results.routes.length;i++){
+                              /*  System.out.println("esto: "+i+" - "+results.routes[i].legs[0].startAddress);
+                                System.out.println("esto: "+i+" - "+results.routes[i].legs[0].distance);
+                                System.out.println("esto: "+i+" - "+results.routes[i].legs[0].endAddress);
+                                System.out.println("esto: "+i+" - "+results.routes[i].legs[0].arrivalTime);
+                                System.out.println("esto: "+i+" - "+results.routes[i].legs[0].duration);*/
+
+                                String valor = (i+1)+". Distancia a recorrer: "+results.routes[i].legs[0].distance+
+                                        " Duración: "+results.routes[i].legs[0].duration;
+                                listRutasString.add(valor);
+                            }
+                            listRutas.setVisibility(View.VISIBLE);
+                            rutaInfo.setVisibility(View.VISIBLE);
+                            volverLista.setVisibility(View.VISIBLE);
+                            rutas.setVisibility(View.GONE);
+                            dirección.setVisibility(View.GONE);
+                            avanzada.setVisibility(View.GONE);
+                            autocompleteFragment.getView().setVisibility(View.GONE);
+                            volver.setVisibility(View.GONE);
+                            mMap.moveCamera(CameraUpdateFactory.newLatLng(desti));
+                            mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                        }
+                        else
+                        Toast.makeText(MapsActivity.this, "No se encuentran rutas", Toast.LENGTH_SHORT).show();
+                    } catch (com.google.maps.errors.ApiException e) {
+                        e.printStackTrace();
+                        Toast.makeText(MapsActivity.this, "Error con el servidor", Toast.LENGTH_SHORT).show();
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                        Toast.makeText(MapsActivity.this, "Se perdió conexión", Toast.LENGTH_SHORT).show();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                        Toast.makeText(MapsActivity.this, "Error", Toast.LENGTH_SHORT).show();
+                    }
+                }
+            }
+        });
+
+        volverLista.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                listRutas.setVisibility(View.GONE);
+                rutaInfo.setVisibility(View.GONE);
+                rutas.setVisibility(View.VISIBLE);
+                volverLista.setVisibility(View.GONE);
+                iniciarRecorrido.setVisibility(View.GONE);
+                removePolyline();
+                routeSelected = 0;
+                if(!advanceLooking){
+                    dirección.setVisibility(View.VISIBLE);
+                    avanzada.setVisibility(View.VISIBLE);
+                }else{
+                    autocompleteFragment.getView().setVisibility(View.VISIBLE);
+                    volver.setVisibility(View.VISIBLE);
+                }
+            }
+        });
+
+        iniciarRecorrido.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                volverLista.setVisibility(View.GONE);
+                listRutas.setVisibility(View.GONE);
+                rutaInfo.setVisibility(View.GONE);
+                cancelar.setVisibility(View.VISIBLE);
+                iniciarRecorrido.setVisibility(View.GONE);
+                recorriendo = true;
+                distanci.setText("Distancia ruta: "+results.routes[routeSelected].legs[0].distance);
+                tiempo.setText("Duración: "+results.routes[routeSelected].legs[0].duration);
+                // faltaria editar disitancia al iniciar recorrido.
+            }
+        });
+
+        cancelar.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                dirección.setVisibility(View.VISIBLE);
+                dirección.setText("");
+                removePolyline();
+                desti=null;
+                avanzada.setVisibility(View.VISIBLE);
+                rutas.setVisibility(View.VISIBLE);
+                cancelar.setVisibility(View.GONE);
+                destinoAzul.setVisible(false);
+                distanci.setText("");
+                tiempo.setText("");
+                routeSelected = 0;
+                recorriendo = false;
             }
         });
     }
@@ -164,15 +385,15 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
         mMap.getUiSettings().setZoomControlsEnabled(true);
         mMap.getUiSettings().setZoomGesturesEnabled(true);
-        actual = new LatLng(4.628479,-74.064908);
+        origen = new LatLng(4.628479,-74.064908);
         if(date.getHours()>=6 && date.getHours()<18){
             if(move != null)
                 move.setImageResource(R.drawable.movelocation);
             mMap.setMapStyle(MapStyleOptions
                     .loadRawResourceStyle(this, R.raw.style_json));
             bikeActual = mMap.addMarker(new MarkerOptions()
-                    .position(actual)
-                    .title("Posición actual")
+                    .position(origen)
+                    .title("Posición origen")
                     .icon(BitmapDescriptorFactory
                             .fromResource(R.drawable.bici)));
             bikeActual.setVisible(false);
@@ -183,15 +404,15 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             mMap.setMapStyle(MapStyleOptions
                     .loadRawResourceStyle(this, R.raw.style_night_json));
             bikeActual = mMap.addMarker(new MarkerOptions()
-                    .position(actual)
-                    .title("Posición actual")
+                    .position(origen)
+                    .title("Posición origen")
                     .icon(BitmapDescriptorFactory
                             .fromResource(R.drawable.bicinight)));
             bikeActual.setVisible(false);
         }
 
         destinoAzul = mMap.addMarker(new MarkerOptions()
-                .position(actual)
+                .position(origen)
                 .icon(BitmapDescriptorFactory
                         .defaultMarker(BitmapDescriptorFactory.HUE_BLUE)));
         destinoAzul.setVisible(false);
@@ -262,14 +483,16 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     }
 
-
+    /*
+        Actualiza el mapa con la actualización actual.
+     */
     private void localizarActual(){
         if(mMap != null && location!=null){
-            actual = new LatLng(location.getLatitude(), location.getLongitude());
-            bikeActual.setPosition(actual);
+            origen = new LatLng(location.getLatitude(), location.getLongitude());
+            bikeActual.setPosition(origen);
             bikeActual.setVisible(true);
             if(first){
-                mMap.moveCamera(CameraUpdateFactory.newLatLng(actual));
+                mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
                 first = false;
             }
         }
@@ -395,13 +618,16 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         return	Math.round(result*100.0)/100.0;
     }
 
+    /*
+        Busca una coordenadas dado un nombre
+     */
     private void buscarDireccion(){
         Geocoder mGeocoder = new Geocoder(getBaseContext());
         String addressString = dirección.getText().toString();
         if (!addressString.isEmpty()) {
             try {
                 List<Address> addresses = mGeocoder.getFromLocationName(
-                        addressString, 2,
+                        addressString, 4,
                         lowerLeftLatitude,
                         lowerLeftLongitude,
                         upperRightLatitude,
@@ -410,18 +636,21 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     Address addressResult = addresses.get(0);
                    desti = new LatLng(addressResult.getLatitude(), addressResult.getLongitude());
                     if (mMap != null) {
-                        System.out.println("destino es "+desti.latitude+ " - "+ desti.longitude);
+                       // System.out.println("destino es "+desti.latitude+ " - "+ desti.longitude);
+                        Ndestino = addressResult.getFeatureName();
                         destinoAzul.setPosition(desti);
                         destinoAzul.setVisible(true);
-                        destinoAzul.setSnippet(addressResult.getFeatureName());
+                        destinoAzul.setTitle(addressResult.getFeatureName());
                         mMap.moveCamera(CameraUpdateFactory.newLatLng(desti));
                         mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
                         calculoDistancia();
+                        advanceLooking = false;
                     }
                 } else {
                     Toast.makeText(MapsActivity.this, "Dirección no encontrada", Toast.LENGTH_SHORT).show();
                     destinoAzul.setVisible(false);
                     desti = null;
+                    Ndestino = null;
                     calculoDistancia();
                 }
             } catch (IOException e) {
@@ -431,17 +660,147 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
             Toast.makeText(MapsActivity.this, "La dirección esta vacía", Toast.LENGTH_SHORT).show();
             destinoAzul.setVisible(false);
             desti = null;
+            Ndestino = null;
             calculoDistancia();
         }
     }
 
+    // escribe la ditancia ente origen y destino
     private void calculoDistancia(){
-        if	(location!=	null && desti!=null){
+        if	(origen !=	null && desti!=null && !recorriendo){
             distanci.setText("Distancia es: "+
                     String.valueOf(distance(location.getLatitude(),location.getLongitude(),
                             desti.latitude,desti.longitude))+" km");
         }
         else
             distanci.setText("");
+    }
+
+    /*
+        Opción de busqueda con placeautocompletefragment de google
+     */
+    private void busquedaAvanzada(){
+        autocompleteFragment = (PlaceAutocompleteFragment)
+                getFragmentManager().findFragmentById(R.id.place_autocomplete_fragment);
+        autocompleteFragment.getView().setVisibility(View.GONE);
+        autocompleteFragment.setBoundsBias(new LatLngBounds(
+                new LatLng(lowerLeftLongitude, lowerLeftLatitude),
+                new LatLng(upperRigthLongitude, upperRightLatitude)));
+        autocompleteFragment.setOnPlaceSelectedListener(new PlaceSelectionListener() {
+            @Override
+            public void onPlaceSelected(Place place) {
+                desti = new LatLng(place.getLatLng().latitude, place.getLatLng().longitude);
+                if (mMap != null) {
+                    Ndestino =  place.getName().toString();
+                    destinoAzul.setPosition(desti);
+                    destinoAzul.setVisible(true);
+                    destinoAzul.setTitle(place.getName().toString());
+                    mMap.moveCamera(CameraUpdateFactory.newLatLng(desti));
+                    mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                    calculoDistancia();
+                    advanceLooking = true;
+                }
+                // Log.i("MAP", "Place: " + place.getName());
+            }
+
+            @Override
+            public void onError(Status status) {
+                Toast.makeText(MapsActivity.this, "Error cargando destino", Toast.LENGTH_SHORT).show();
+            }
+        });
+
+    }
+
+    /*
+           Crea contexto con time outs
+        */
+    private GeoApiContext getGeoContext(){
+        GeoApiContext geoApiContext = new GeoApiContext();
+        return geoApiContext.setQueryRateLimit(3).setApiKey(GOOGLE_KEY_SERVER).setConnectTimeout(1,
+                TimeUnit.SECONDS).setReadTimeout(1, TimeUnit.SECONDS).setWriteTimeout(1, TimeUnit.SECONDS);
+    }
+
+    /*
+    Dibuja la ruta  en map según la ruta dada
+     */
+    private void addPolyline(DirectionsResult results, int r) {
+        List<LatLng> decodedPath = PolyUtil.decode(results.routes[r].overviewPolyline.getEncodedPath());
+        poly = mMap.addPolyline(new PolylineOptions().addAll(decodedPath)
+                .width(2)
+                .color(Color.RED));
+
+    }
+
+    private boolean removePolyline(){
+        try{
+            if(poly!=null){
+                poly.remove();
+            }
+            return true;
+        }catch (Exception e){
+            return false;
+        }
+    }
+
+    private void enMovimiento(){
+        boolean complete = true;
+        if(desti == null || origen == null){
+            complete = false;
+        }
+        if(complete) {
+            DateTime now = new DateTime();
+            try {
+                results = DirectionsApi.newRequest(getGeoContext())
+                        .mode(TravelMode.DRIVING)// preguntar si hacer dos solictudes con
+                        // biclycling y si vacia con driving o solo driving
+                        .origin(new com.google.maps.model.LatLng(origen.latitude, origen.longitude))
+                        .destination(new com.google.maps.model.LatLng(desti.latitude, desti.longitude))
+                        .alternatives(true)
+                        .departureTime(now)
+                        .await();
+                if (results.routes.length > 0) {
+                    if (results.routes.length >= routeSelected) {
+                        distanci.setText("Distancia ruta: " + results.routes[routeSelected].legs[0].distance);
+                        tiempo.setText("Duración: " + results.routes[routeSelected].legs[0].duration);
+                        mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
+                        mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                        if (removePolyline())
+                            addPolyline(results, routeSelected);
+                    } else {
+                        distanci.setText("Distancia ruta: " + results.routes[routeSelected].legs[0].distance);
+                        tiempo.setText("Duración: " + results.routes[routeSelected].legs[0].duration);
+                        mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
+                        mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                        if (removePolyline())
+                            addPolyline(results, routeSelected);
+                    }
+                }
+                else {
+                    if (removePolyline()) {
+                        distanci.setText("Espere un momento");
+                        tiempo.setText("");
+                    }
+                }
+            } catch (com.google.maps.errors.ApiException e) {
+                recorriendo = false;
+                tiempo.setText("");
+                distanci.setText("Vuelva a iniciar recorrido");
+                e.printStackTrace();
+                Toast.makeText(MapsActivity.this, "Error con el servidor", Toast.LENGTH_SHORT).show();
+            } catch (InterruptedException e) {
+                recorriendo = false;
+                tiempo.setText("");
+                distanci.setText("Vuelva a iniciar recorrido");
+                e.printStackTrace();
+                Toast.makeText(MapsActivity.this, "Se perdió conexión", Toast.LENGTH_SHORT).show();
+            } catch (IOException e) {
+                recorriendo = false;
+                tiempo.setText("");
+                distanci.setText("Vuelva a iniciar recorrido");
+                e.printStackTrace();
+                Toast.makeText(MapsActivity.this, "Error en la ruta", Toast.LENGTH_SHORT).show();
+            }
+
+        }
     }
 }
