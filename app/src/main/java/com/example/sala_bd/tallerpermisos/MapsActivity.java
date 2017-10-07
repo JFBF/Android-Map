@@ -529,6 +529,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         }
     }
 
+    /*
+   para localización si estta apagada.
+    */
     private void localizacion(){
         int permissionCheck = ContextCompat.checkSelfPermission(this,
                 Manifest.permission.ACCESS_FINE_LOCATION);
@@ -731,6 +734,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
 
     }
 
+    /*
+    elimina linea polyline
+     */
     private boolean removePolyline(){
         try{
             if(poly!=null){
@@ -742,6 +748,9 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
         }
     }
 
+    /*
+    actualiza polyline al actualizar localicazión
+     */
     private void enMovimiento(){
         boolean complete = true;
         if(desti == null || origen == null){
