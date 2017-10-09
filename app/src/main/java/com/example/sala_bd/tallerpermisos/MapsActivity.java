@@ -113,7 +113,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
     public static final double upperRightLatitude = 4.817991;
     public static final double upperRigthLongitude = -74.001390;
 
-    private static final String GOOGLE_KEY_SERVER = "AIzaSyA3FRnFnpx7zoMV7xlMjVUOrZKIuOjYykk";
+    private static final String GOOGLE_KEY_SERVER = "AIzaSyD4dOczZ_6BUHiAViTs1xsajoS_xpJP1F4";
 
 
 
@@ -147,7 +147,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                     if(location!=null && mMap!=null) {
                         origen = new LatLng(location.getLatitude(), location.getLongitude());
                         mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
-                        mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                        mMap.moveCamera(CameraUpdateFactory.zoomTo(17));
                     }
                 }
                 else
@@ -295,7 +295,7 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                             autocompleteFragment.getView().setVisibility(View.GONE);
                             volver.setVisibility(View.GONE);
                             mMap.moveCamera(CameraUpdateFactory.newLatLng(desti));
-                            mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                            mMap.moveCamera(CameraUpdateFactory.zoomTo(14));
                         }
                         else
                         Toast.makeText(MapsActivity.this, "No se encuentran rutas", Toast.LENGTH_SHORT).show();
@@ -344,7 +344,8 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                 recorriendo = true;
                 distanci.setText("Distancia ruta: "+results.routes[routeSelected].legs[0].distance);
                 tiempo.setText("Duración: "+results.routes[routeSelected].legs[0].duration);
-                // faltaria editar disitancia al iniciar recorrido.
+                mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
+                mMap.moveCamera(CameraUpdateFactory.zoomTo(17));
             }
         });
 
@@ -772,14 +773,14 @@ public class MapsActivity extends FragmentActivity implements OnMapReadyCallback
                         distanci.setText("Distancia ruta: " + results.routes[routeSelected].legs[0].distance);
                         tiempo.setText("Duración: " + results.routes[routeSelected].legs[0].duration);
                         mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
-                        mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                        mMap.moveCamera(CameraUpdateFactory.zoomTo(17));
                         if (removePolyline())
                             addPolyline(results, routeSelected);
                     } else {
                         distanci.setText("Distancia ruta: " + results.routes[routeSelected].legs[0].distance);
                         tiempo.setText("Duración: " + results.routes[routeSelected].legs[0].duration);
                         mMap.moveCamera(CameraUpdateFactory.newLatLng(origen));
-                        mMap.moveCamera(CameraUpdateFactory.zoomTo(15));
+                        mMap.moveCamera(CameraUpdateFactory.zoomTo(17));
                         if (removePolyline())
                             addPolyline(results, routeSelected);
                     }
